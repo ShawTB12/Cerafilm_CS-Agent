@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -29,13 +30,13 @@ import {
 import { cn } from "@/lib/utils"
 
 const sidebarItems = [
-  { icon: Home, label: "HOME", id: "home", active: true },
-  { icon: BarChart3, label: "DASHBOARD", id: "dashboard" },
-  { icon: Mail, label: "MAIL", id: "mail" },
-  { icon: MessageCircle, label: "LINE", id: "line" },
-  { icon: Phone, label: "CALL", id: "call" },
-  { icon: Database, label: "DATABASE", id: "database" },
-  { icon: Settings, label: "SETTING", id: "setting" },
+  { icon: Home, label: "HOME", id: "home", route: "/", active: true },
+  { icon: BarChart3, label: "DASHBOARD", id: "dashboard", route: "/" },
+  { icon: Mail, label: "MAIL", id: "mail", route: "/mail" },
+  { icon: MessageCircle, label: "LINE", id: "line", route: "/line" },
+  { icon: Phone, label: "CALL", id: "call", route: "/call" },
+  { icon: Database, label: "DATABASE", id: "database", route: "/database" },
+  { icon: Settings, label: "SETTING", id: "setting", route: "/settings" },
 ]
 
 const kpiData = [
@@ -69,6 +70,7 @@ const kpiData = [
 ]
 
 export default function HomePage() {
+  const router = useRouter()
   const [activeItem, setActiveItem] = useState("home")
   const [currentTime, setCurrentTime] = useState<Date | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -137,7 +139,12 @@ export default function HomePage() {
             {sidebarItems.map((item) => (
               <button
                 key={item.id}
-                onClick={() => setActiveItem(item.id)}
+                onClick={() => {
+                  setActiveItem(item.id)
+                  if (item.route !== "/") {
+                    router.push(item.route)
+                  }
+                }}
                 className={cn(
                   "w-full flex items-center space-x-3 px-4 py-3 rounded-[14px] text-sm font-medium transition-all duration-200 ease-out backdrop-blur-sm",
                   activeItem === item.id
@@ -235,7 +242,13 @@ export default function HomePage() {
               <Card
                 key={kpi.id}
                 className="bg-white/70 backdrop-blur-[32px] border border-white/40 shadow-[0_8px_32px_rgba(0,0,0,0.1)] rounded-[24px] hover:shadow-[0_16px_48px_rgba(0,0,0,0.15)] hover:bg-white/80 transition-all duration-300 ease-out hover:scale-[1.03] hover:-translate-y-1 cursor-pointer group"
-                onClick={() => setActiveItem(kpi.id)}
+                onClick={() => {
+                  setActiveItem(kpi.id)
+                  const targetRoute = kpi.id === "mail" ? "/mail" : kpi.id === "line" ? "/line" : kpi.id === "call" ? "/call" : "/"
+                  if (targetRoute !== "/") {
+                    router.push(targetRoute)
+                  }
+                }}
               >
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between mb-4">
