@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,65 +8,170 @@ import { Badge } from "@/components/ui/badge"
 import { ArrowLeft, Search, Filter, Send, Sparkles, RefreshCw, ImageIcon, Smile, MoreHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const lineData = [
-  {
-    id: 1,
-    name: "田中 太郎",
-    userId: "@tanaka_taro",
-    lastMessage: "商品の使い方がわからないので教えてください",
-    time: "10:30",
-    status: "未対応",
-    priority: "高",
-    unread: 2,
-  },
-  {
-    id: 2,
-    name: "佐藤 花子",
-    userId: "@sato_hanako",
-    lastMessage: "ありがとうございました！",
-    time: "09:15",
-    status: "完了",
-    priority: "中",
-    unread: 0,
-  },
-  {
-    id: 3,
-    name: "山田 次郎",
-    userId: "@yamada_jiro",
-    lastMessage: "配送はいつ頃になりますか？",
-    time: "昨日",
-    status: "対応中",
-    priority: "中",
-    unread: 1,
-  },
-]
+interface LineMessage {
+  id: string;
+  userId: string;
+  displayName: string;
+  text: string;
+  timestamp: string;
+  type: 'user' | 'bot';
+  status: string;
+  priority: string;
+}
 
-const chatMessages = [
-  {
-    id: 1,
-    sender: "user",
-    message: "こんにちは",
-    time: "10:25",
-  },
-  {
-    id: 2,
-    sender: "user",
-    message: "商品の使い方がわからないので教えてください",
-    time: "10:26",
-  },
-  {
-    id: 3,
-    sender: "user",
-    message: "特に設定方法がよくわかりません",
-    time: "10:27",
-  },
-]
+interface LineChat {
+  id: number;
+  name: string;
+  userId: string;
+  lastMessage: string;
+  time: string;
+  status: string;
+  priority: string;
+  unread: number;
+}
 
 export default function LinePage() {
   const [selectedChat, setSelectedChat] = useState<number | null>(null)
   const [message, setMessage] = useState("")
+  const [lineChats, setLineChats] = useState<LineChat[]>([])
+  const [chatMessages, setChatMessages] = useState<LineMessage[]>([])
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
 
-  const selectedChatData = selectedChat ? lineData.find((l) => l.id === selectedChat) : null
+  // メッセージ履歴を取得
+  const fetchMessages = async (userId?: string) => {
+    try {
+      const url = userId ? `/api/line/messages?userId=${userId}` : '/api/line/messages'
+      console.log('Fetching messages from:', url)
+      const response = await fetch(url)
+      const data = await response.json()
+      
+      console.log('API Response:', data)
+      
+      if (response.ok) {
+        console.log('Messages fetched successfully:', data.messages.length, 'messages')
+        return data.messages
+      } else {
+        console.error('Failed to fetch messages:', data.error)
+        return []
+      }
+    } catch (error) {
+      console.error('Error fetching messages:', error)
+      return []
+    }
+  }
+
+  // メッセージを送信
+  const sendMessage = async (userId: string, text: string) => {
+    try {
+      setSending(true)
+      const response = await fetch('/api/line/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          text,
+        }),
+      })
+
+      const data = await response.json()
+      
+      if (response.ok) {
+        // メッセージ送信成功後、メッセージ履歴を再取得
+        const updatedMessages = await fetchMessages(userId)
+        setChatMessages(updatedMessages)
+        setMessage("")
+      } else {
+        console.error('Failed to send message:', data.error)
+        alert('メッセージの送信に失敗しました')
+      }
+    } catch (error) {
+      console.error('Error sending message:', error)
+      alert('メッセージの送信中にエラーが発生しました')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // 初期データ読み込み
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setLoading(true)
+      try {
+        console.log('Loading initial data...')
+        const messages = await fetchMessages()
+        console.log('Raw messages received:', messages)
+        
+        // メッセージからチャット一覧を生成
+        const chatsMap = new Map<string, LineChat>()
+        let chatId = 1
+        
+        messages.forEach((msg: LineMessage) => {
+          if (msg.type === 'user' && !chatsMap.has(msg.userId)) {
+            const chatData = {
+              id: chatId++,
+              name: msg.displayName,
+              userId: msg.userId,
+              lastMessage: msg.text,
+              time: new Date(msg.timestamp).toLocaleTimeString('ja-JP', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+              }),
+              status: msg.status,
+              priority: msg.priority,
+              unread: messages.filter((m: LineMessage) => 
+                m.userId === msg.userId && m.type === 'user'
+              ).length
+            }
+            console.log('Adding chat:', chatData)
+            chatsMap.set(msg.userId, chatData)
+          }
+        })
+        
+        const chatsList = Array.from(chatsMap.values())
+        console.log('Generated chats list:', chatsList)
+        
+        setLineChats(chatsList)
+        setChatMessages(messages)
+      } catch (error) {
+        console.error('Error loading initial data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadInitialData()
+
+    // 定期的にデータを更新（5秒ごと）
+    const interval = setInterval(loadInitialData, 5000)
+    
+    return () => clearInterval(interval)
+  }, [])
+
+  // 選択されたチャットのメッセージを取得
+  useEffect(() => {
+    if (selectedChat) {
+      const selectedChatData = lineChats.find(chat => chat.id === selectedChat)
+      if (selectedChatData) {
+        fetchMessages(selectedChatData.userId).then(setChatMessages)
+      }
+    }
+  }, [selectedChat, lineChats])
+
+  const selectedChatData = selectedChat ? lineChats.find((l) => l.id === selectedChat) : null
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-slate-600" />
+          <p className="text-slate-600">LINEメッセージを読み込んでいます...</p>
+        </div>
+      </div>
+    )
+  }
 
   if (selectedChat && selectedChatData) {
     return (
@@ -109,31 +214,46 @@ export default function LinePage() {
                 {/* Chat Header */}
                 <div className="border-b border-white/20 pb-4 mb-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-600">今日 10:25</span>
-                    <Button variant="ghost" size="sm" className="rounded-[12px]">
-                      <MoreHorizontal className="w-4 h-4" />
+                    <span className="text-sm text-slate-600">
+                      {new Date().toLocaleDateString('ja-JP', { 
+                        month: 'short', 
+                        day: 'numeric' 
+                      })}
+                    </span>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="rounded-[12px]"
+                      onClick={() => fetchMessages(selectedChatData.userId).then(setChatMessages)}
+                    >
+                      <RefreshCw className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
 
                 {/* Messages */}
                 <div className="flex-1 space-y-4 overflow-y-auto">
-                  {chatMessages.map((msg) => (
-                    <div key={msg.id} className={cn("flex", msg.sender === "user" ? "justify-start" : "justify-end")}>
+                  {chatMessages
+                    .filter(msg => msg.userId === selectedChatData.userId)
+                    .map((msg) => (
+                    <div key={msg.id} className={cn("flex", msg.type === "user" ? "justify-start" : "justify-end")}>
                       <div
                         className={cn(
                           "max-w-[80%] p-3 rounded-[16px] text-sm",
-                          msg.sender === "user" ? "bg-white/70 text-slate-700" : "bg-[#2D8EFF] text-white",
+                          msg.type === "user" ? "bg-white/70 text-slate-700" : "bg-[#2D8EFF] text-white",
                         )}
                       >
-                        <p>{msg.message}</p>
+                        <p>{msg.text}</p>
                         <span
                           className={cn(
                             "text-xs mt-1 block",
-                            msg.sender === "user" ? "text-slate-500" : "text-blue-100",
+                            msg.type === "user" ? "text-slate-500" : "text-blue-100",
                           )}
                         >
-                          {msg.time}
+                          {new Date(msg.timestamp).toLocaleTimeString('ja-JP', { 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                          })}
                         </span>
                       </div>
                     </div>
@@ -154,9 +274,19 @@ export default function LinePage() {
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}
                       className="flex-1 bg-white/70 border-white/30 rounded-[12px]"
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && message.trim() && !sending) {
+                          sendMessage(selectedChatData.userId, message.trim())
+                        }
+                      }}
+                      disabled={sending}
                     />
-                    <Button className="bg-[#3DDC97] hover:bg-[#3DDC97]/90 rounded-[12px]">
-                      <Send className="w-4 h-4" />
+                    <Button 
+                      className="bg-[#3DDC97] hover:bg-[#3DDC97]/90 rounded-[12px]"
+                      onClick={() => message.trim() && sendMessage(selectedChatData.userId, message.trim())}
+                      disabled={!message.trim() || sending}
+                    >
+                      {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     </Button>
                   </div>
                 </div>
@@ -288,59 +418,191 @@ export default function LinePage() {
             <Button variant="ghost" size="icon" className="rounded-[12px]">
               <Filter className="w-5 h-5" />
             </Button>
+            <Button 
+              onClick={() => {
+                // 実際のLINEメッセージ受信をシミュレート
+                const simulateMessage = async () => {
+                  const testMessage = {
+                    id: `test_${Date.now()}`,
+                    userId: `U${Math.random().toString(36).substr(2, 9)}`,
+                    displayName: `テストユーザー${Math.floor(Math.random() * 100)}`,
+                    text: [
+                      'こんにちは、商品について質問があります',
+                      '配送状況を教えてください',
+                      '返品の手続きを知りたいです',
+                      'ありがとうございました！',
+                      '問題が解決しました'
+                    ][Math.floor(Math.random() * 5)],
+                    timestamp: new Date().toISOString(),
+                    type: 'user',
+                    status: '未対応',
+                    priority: ['高', '中', '低'][Math.floor(Math.random() * 3)],
+                  };
+
+                  // WebhookエンドポイントにPOST
+                  try {
+                    const response = await fetch('/api/line/webhook', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        events: [{
+                          type: 'message',
+                          message: {
+                            type: 'text',
+                            text: testMessage.text
+                          },
+                          source: {
+                            userId: testMessage.userId
+                          },
+                          replyToken: 'test_reply_token_' + Date.now()
+                        }]
+                      })
+                    });
+                    
+                    if (response.ok) {
+                      console.log('Test message sent successfully');
+                      // データを再読み込み
+                      const messages = await fetchMessages()
+                      const chatsMap = new Map<string, LineChat>()
+                      let chatId = 1
+                      
+                      messages.forEach((msg: LineMessage) => {
+                        if (msg.type === 'user' && !chatsMap.has(msg.userId)) {
+                          chatsMap.set(msg.userId, {
+                            id: chatId++,
+                            name: msg.displayName,
+                            userId: msg.userId,
+                            lastMessage: msg.text,
+                            time: new Date(msg.timestamp).toLocaleTimeString('ja-JP', { 
+                              hour: '2-digit', 
+                              minute: '2-digit' 
+                            }),
+                            status: msg.status,
+                            priority: msg.priority,
+                            unread: messages.filter((m: LineMessage) => 
+                              m.userId === msg.userId && m.type === 'user'
+                            ).length
+                          })
+                        }
+                      })
+                      
+                      setLineChats(Array.from(chatsMap.values()))
+                      setChatMessages(messages)
+                    }
+                  } catch (error) {
+                    console.error('Error simulating message:', error);
+                  }
+                };
+
+                simulateMessage();
+              }}
+              className="bg-[#3DDC97] hover:bg-[#3DDC97]/90 text-white rounded-[12px]"
+            >
+              <Send className="w-4 h-4 mr-2" />
+              テストメッセージ
+            </Button>
           </div>
         </div>
 
         {/* Chat List */}
         <Card className="bg-white/55 backdrop-blur-[24px] border-white/20 shadow-[0_8px_24px_rgba(0,0,0,0.08)] rounded-[20px]">
           <CardContent className="p-0">
-            {lineData.map((chat, index) => (
-              <div
-                key={chat.id}
-                onClick={() => setSelectedChat(chat.id)}
-                className={cn(
-                  "flex items-center space-x-4 p-6 cursor-pointer transition-all duration-150 ease-out hover:bg-white/30",
-                  index !== lineData.length - 1 && "border-b border-white/20",
-                )}
-              >
-                {/* Avatar */}
-                <div className="relative">
-                  <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-green-600 rounded-full flex items-center justify-center">
-                    <span className="text-white font-medium">{chat.name.charAt(0)}</span>
-                  </div>
-                  {chat.unread > 0 && (
-                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-[#FF7A7A] rounded-full flex items-center justify-center">
-                      <span className="text-white text-xs font-medium">{chat.unread}</span>
-                    </div>
-                  )}
+            {lineChats.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                <div className="w-16 h-16 bg-gradient-to-br from-green-500/20 to-green-600/20 rounded-full flex items-center justify-center mb-4">
+                  <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-green-600 rounded-full" />
                 </div>
-
-                {/* Chat Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-3 mb-1">
-                    <span className="font-medium text-slate-900">{chat.name}</span>
-                    <span className="text-sm text-slate-500">{chat.userId}</span>
-                    <Badge
-                      variant={
-                        chat.status === "未対応" ? "destructive" : chat.status === "対応中" ? "default" : "secondary"
+                <h3 className="text-lg font-semibold text-slate-900 mb-2">LINEメッセージがありません</h3>
+                <p className="text-sm text-slate-600 mb-4">
+                  顧客からのメッセージを受信すると、ここに表示されます。
+                </p>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="rounded-[12px]"
+                  onClick={() => fetchMessages().then(messages => {
+                    const chatsMap = new Map<string, LineChat>()
+                    let chatId = 1
+                    
+                    messages.forEach((msg: LineMessage) => {
+                      if (msg.type === 'user' && !chatsMap.has(msg.userId)) {
+                        chatsMap.set(msg.userId, {
+                          id: chatId++,
+                          name: msg.displayName,
+                          userId: msg.userId,
+                          lastMessage: msg.text,
+                          time: new Date(msg.timestamp).toLocaleTimeString('ja-JP', { 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                          }),
+                          status: msg.status,
+                          priority: msg.priority,
+                          unread: messages.filter((m: LineMessage) => 
+                            m.userId === msg.userId && m.type === 'user'
+                          ).length
+                        })
                       }
-                      className="text-xs rounded-full"
-                    >
-                      {chat.status}
+                    })
+                    
+                    setLineChats(Array.from(chatsMap.values()))
+                    setChatMessages(messages)
+                  })}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  更新
+                </Button>
+              </div>
+            ) : (
+              lineChats.map((chat, index) => (
+                <div
+                  key={chat.id}
+                  onClick={() => setSelectedChat(chat.id)}
+                  className={cn(
+                    "flex items-center space-x-4 p-6 cursor-pointer transition-all duration-150 ease-out hover:bg-white/30",
+                    index !== lineChats.length - 1 && "border-b border-white/20",
+                  )}
+                >
+                  {/* Avatar */}
+                  <div className="relative">
+                    <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-green-600 rounded-full flex items-center justify-center">
+                      <span className="text-white font-medium">{chat.name.charAt(0)}</span>
+                    </div>
+                    {chat.unread > 0 && (
+                      <div className="absolute -top-1 -right-1 w-5 h-5 bg-[#FF7A7A] rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs font-medium">{chat.unread}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Chat Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center space-x-3 mb-1">
+                      <span className="font-medium text-slate-900">{chat.name}</span>
+                      <span className="text-sm text-slate-500">{chat.userId}</span>
+                      <Badge
+                        variant={
+                          chat.status === "未対応" ? "destructive" : chat.status === "対応中" ? "default" : "secondary"
+                        }
+                        className="text-xs rounded-full"
+                      >
+                        {chat.status}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-slate-600 truncate">{chat.lastMessage}</p>
+                  </div>
+
+                  {/* Time & Priority */}
+                  <div className="text-right">
+                    <span className="text-sm text-slate-500 block">{chat.time}</span>
+                    <Badge variant="outline" className="text-xs rounded-full mt-1">
+                      {chat.priority}
                     </Badge>
                   </div>
-                  <p className="text-sm text-slate-600 truncate">{chat.lastMessage}</p>
                 </div>
-
-                {/* Time & Priority */}
-                <div className="text-right">
-                  <span className="text-sm text-slate-500 block">{chat.time}</span>
-                  <Badge variant="outline" className="text-xs rounded-full mt-1">
-                    {chat.priority}
-                  </Badge>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </CardContent>
         </Card>
       </div>
