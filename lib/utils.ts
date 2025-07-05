@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { NextResponse } from "next/server"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -130,32 +131,30 @@ export interface APIResponse<T = any> {
   };
 }
 
-export function createSuccessResponse<T>(data: T, meta?: any): APIResponse<T> {
-  return {
+export function createSuccessResponse<T>(data: T, statusCode: number = 200, meta?: any) {
+  return NextResponse.json({
     success: true,
     data,
     meta: {
       timestamp: new Date().toISOString(),
       ...meta,
     },
-  };
+  }, { status: statusCode });
 }
 
-export function createErrorResponse(error: APIError | Error, meta?: any): APIResponse {
-  const apiError = error instanceof APIError ? error : APIError.fromError(error);
-  
-  return {
+export function createErrorResponse(message: string, statusCode: number = 500, meta?: any) {
+  return NextResponse.json({
     success: false,
     error: {
-      code: apiError.code,
-      message: apiError.message,
-      details: apiError.details,
+      code: `HTTP_${statusCode}`,
+      message,
+      details: null,
     },
     meta: {
       timestamp: new Date().toISOString(),
       ...meta,
     },
-  };
+  }, { status: statusCode });
 }
 
 // リトライ機能付きAPI呼び出し

@@ -9,13 +9,7 @@ export async function GET(request: NextRequest) {
     const session = await getServerSession(authOptions);
     
     if (!session?.accessToken) {
-      const error = new APIError(
-        'Authentication required. Please sign in with Google.',
-        'AUTH_REQUIRED',
-        401,
-        { isAuthError: true }
-      );
-      return NextResponse.json(createErrorResponse(error), { status: 401 });
+      return createErrorResponse('Authentication required. Please sign in with Google.', 401);
     }
 
     const { searchParams } = new URL(request.url);
@@ -60,16 +54,16 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    const response = createSuccessResponse({
+    return createSuccessResponse({
       messages: messageDetails.filter(Boolean),
       nextPageToken: messages.nextPageToken,
       resultSizeEstimate: messages.resultSizeEstimate,
     });
-    
-    return NextResponse.json(response);
   } catch (error) {
     console.error('Error in GET /api/gmail/messages:', error);
-    const apiError = APIError.fromError(error);
-    return NextResponse.json(createErrorResponse(apiError), { status: apiError.statusCode });
+    return createErrorResponse(
+      error instanceof Error ? error.message : 'Failed to fetch Gmail messages',
+      500
+    );
   }
 } 

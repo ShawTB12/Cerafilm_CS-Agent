@@ -1,0 +1,22 @@
+[
+  {
+    "id": "msg_1751556900451_8cb3086ru",
+    "userId": "U60fc92dfa2e37ea4ce7abe5271eb578b",
+    "displayName": "KURODA",
+    "text": "こんにちは",
+    "timestamp": "2025-07-03T15:35:00.451Z",
+    "type": "user",
+    "status": "未対応",
+    "priority": "低"
+  },
+  {
+    "id": "bot_1751556900517_h87d480wu",
+    "userId": "U60fc92dfa2e37ea4ce7abe5271eb578b",
+    "displayName": "Cerafilm CS Bot",
+    "text": "KURODA様、こんにちは！\n\nCerafilm カスタマーサクセスチームです。\nお困りのことがございましたら、お気軽にお声かけください🙂",
+    "timestamp": "2025-07-03T15:35:00.517Z",
+    "type": "bot",
+    "status": "回答済み",
+    "priority": "中"
+  }
+]

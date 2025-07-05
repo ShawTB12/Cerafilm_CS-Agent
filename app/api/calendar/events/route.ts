@@ -10,10 +10,7 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !session.accessToken) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return createErrorResponse('Authentication required. Please sign in with Google.', 401);
     }
 
     const { searchParams } = new URL(request.url);
@@ -41,16 +38,16 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const response = createSuccessResponse({
+    return createSuccessResponse({
       events,
       type: type || 'all',
     });
-    
-    return NextResponse.json(response);
   } catch (error) {
     console.error('Error in GET /api/calendar/events:', error);
-    const apiError = APIError.fromError(error);
-    return NextResponse.json(createErrorResponse(apiError), { status: apiError.statusCode });
+    return createErrorResponse(
+      error instanceof Error ? error.message : 'Failed to fetch calendar events',
+      500
+    );
   }
 }
 
@@ -59,10 +56,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !session.accessToken) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return createErrorResponse('Authentication required. Please sign in with Google.', 401);
     }
 
     const body = await request.json();
@@ -80,10 +74,7 @@ export async function POST(request: NextRequest) {
 
     // バリデーション
     if (!customerName || !customerPhone || !subject || !startDateTime || !endDateTime) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
+      return createErrorResponse('Missing required fields', 400);
     }
 
     const reservation: Omit<CallReservation, 'id'> = {
@@ -103,27 +94,20 @@ export async function POST(request: NextRequest) {
     // 空き時間チェック
     const isAvailable = await calendarClient.checkAvailability(startDateTime, endDateTime);
     if (!isAvailable) {
-      return NextResponse.json(
-        { error: '指定された時間帯は既に予約が入っています' },
-        { status: 409 }
-      );
+      return createErrorResponse('指定された時間帯は既に予約が入っています', 409);
     }
 
     const createdEvent = await calendarClient.createCallReservation(reservation);
 
-    return NextResponse.json({
-      success: true,
+    return createSuccessResponse({
       event: createdEvent,
       message: '電話予約が正常に作成されました',
-    });
+    }, 201);
   } catch (error) {
     console.error('Error in POST /api/calendar/events:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to create call reservation',
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
+    return createErrorResponse(
+      error instanceof Error ? error.message : 'Failed to create call reservation',
+      500
     );
   }
 }
@@ -133,20 +117,14 @@ export async function PUT(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !session.accessToken) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return createErrorResponse('Authentication required. Please sign in with Google.', 401);
     }
 
     const body = await request.json();
     const { eventId, ...updates } = body;
 
     if (!eventId) {
-      return NextResponse.json(
-        { error: 'Event ID is required' },
-        { status: 400 }
-      );
+      return createErrorResponse('Event ID is required', 400);
     }
 
     const calendarClient = new CalendarClient(session.accessToken);
@@ -158,28 +136,21 @@ export async function PUT(request: NextRequest) {
         updates.endDateTime
       );
       if (!isAvailable) {
-        return NextResponse.json(
-          { error: '指定された時間帯は既に予約が入っています' },
-          { status: 409 }
-        );
+        return createErrorResponse('指定された時間帯は既に予約が入っています', 409);
       }
     }
 
     const updatedEvent = await calendarClient.updateCallReservation(eventId, updates);
 
-    return NextResponse.json({
-      success: true,
+    return createSuccessResponse({
       event: updatedEvent,
       message: '電話予約が正常に更新されました',
     });
   } catch (error) {
     console.error('Error in PUT /api/calendar/events:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to update call reservation',
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
+    return createErrorResponse(
+      error instanceof Error ? error.message : 'Failed to update call reservation',
+      500
     );
   }
 }
@@ -189,37 +160,27 @@ export async function DELETE(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !session.accessToken) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return createErrorResponse('Authentication required. Please sign in with Google.', 401);
     }
 
     const { searchParams } = new URL(request.url);
     const eventId = searchParams.get('eventId');
 
     if (!eventId) {
-      return NextResponse.json(
-        { error: 'Event ID is required' },
-        { status: 400 }
-      );
+      return createErrorResponse('Event ID is required', 400);
     }
 
     const calendarClient = new CalendarClient(session.accessToken);
     await calendarClient.deleteEvent(eventId);
 
-    return NextResponse.json({
-      success: true,
+    return createSuccessResponse({
       message: 'イベントが正常に削除されました',
     });
   } catch (error) {
     console.error('Error in DELETE /api/calendar/events:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to delete event',
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
+    return createErrorResponse(
+      error instanceof Error ? error.message : 'Failed to delete event',
+      500
     );
   }
 } 
