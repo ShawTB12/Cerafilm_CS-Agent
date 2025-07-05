@@ -1,19 +1,41 @@
-// LINE Messaging API 設定
+// LINE Bot API 設定
 export const LINE_CONFIG = {
-  // LINE Bot 設定
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
-  channelSecret: process.env.LINE_CHANNEL_SECRET || '',
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || 'development_test_token',
+  channelSecret: process.env.LINE_CHANNEL_SECRET || 'development_test_secret',
+  
+  // API エンドポイント
+  apiEndpoint: 'https://api.line.me/v2/bot',
   
   // Webhook設定
-  webhookUrl: process.env.LINE_WEBHOOK_URL || 'http://localhost:3000/api/line/webhook',
+  webhookUrl: process.env.LINE_WEBHOOK_URL || 'https://your-domain.com/api/line/webhook',
   
-  // API設定
-  apiVersion: 'v2',
-  maxMessages: 100, // 一度に取得する最大メッセージ数
+  // メッセージ制限
+  maxMessageLength: 5000,
+  maxQuickReplyItems: 13,
   
-  // アプリ設定
-  appName: 'Cerafilm CS LINE Bot',
+  // 自動応答設定
+  autoReplyEnabled: process.env.LINE_AUTO_REPLY_ENABLED === 'true',
+  autoReplyDelay: 1000, // 1秒
 } as const;
+
+// 型定義
+export interface LineUser {
+  userId: string;
+  displayName?: string;
+  pictureUrl?: string;
+  statusMessage?: string;
+}
+
+export interface LineMessage {
+  id: string;
+  type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'sticker';
+  text?: string;
+  timestamp: Date;
+  source: {
+    userId: string;
+    type: string;
+  };
+}
 
 // 設定値の検証
 export function validateLineConfig() {
@@ -24,28 +46,60 @@ export function validateLineConfig() {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
   
+  // 開発環境での特別な処理
+  if (process.env.NODE_ENV === 'development' && 
+      LINE_CONFIG.channelAccessToken === 'development_test_token') {
+    console.warn('Using development test token for LINE API');
+    return true;
+  }
+  
+  // 設定値の形式チェック
+  if (!LINE_CONFIG.channelAccessToken.startsWith('Bearer ') && 
+      LINE_CONFIG.channelAccessToken.length < 50) {
+    console.warn('LINE_CHANNEL_ACCESS_TOKEN may not be valid format');
+  }
+  
+  if (LINE_CONFIG.channelSecret.length < 32) {
+    console.warn('LINE_CHANNEL_SECRET may be too short');
+  }
+  
   return true;
 }
 
-// メッセージタイプの定義
-export type LineMessageType = 'text' | 'image' | 'audio' | 'video' | 'file' | 'location' | 'sticker';
-
-// ユーザー情報の型定義
-export interface LineUser {
-  userId: string;
-  displayName?: string;
-  pictureUrl?: string;
-  statusMessage?: string;
-}
-
-// メッセージの型定義
-export interface LineMessage {
-  id: string;
-  type: LineMessageType;
-  text?: string;
-  timestamp: Date;
-  source: {
-    userId: string;
-    type: 'user' | 'group' | 'room';
+// ランタイムでの設定値の健全性チェック
+export function checkLineConfigHealth(): {
+  isValid: boolean;
+  warnings: string[];
+  errors: string[];
+  isDevelopment: boolean;
+} {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  
+  try {
+    validateLineConfig();
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+  
+  // 開発環境での追加チェック
+  if (isDevelopment && LINE_CONFIG.channelAccessToken === 'development_test_token') {
+    warnings.push('Using development test token - API calls will be simulated');
+  }
+  
+  // プロダクション環境での追加チェック
+  if (!isDevelopment) {
+    if (LINE_CONFIG.channelAccessToken.includes('test') || 
+        LINE_CONFIG.channelAccessToken.includes('dev')) {
+      warnings.push('Channel access token appears to be for testing');
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    warnings,
+    errors,
+    isDevelopment,
   };
 } 

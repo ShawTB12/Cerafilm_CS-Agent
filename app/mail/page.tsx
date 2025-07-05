@@ -201,6 +201,35 @@ export default function MailPage() {
     }
   }, [session?.accessToken, autoRefresh, currentPage])
 
+  // 認証状態の確認
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-slate-600">認証状態を確認中...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === "unauthenticated" || !session) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100 flex items-center justify-center">
+        <Card className="bg-white/55 backdrop-blur-[24px] border-white/20 shadow-[0_8px_24px_rgba(0,0,0,0.08)] rounded-[20px] p-8">
+          <div className="text-center">
+            <Mail className="w-12 h-12 mx-auto mb-4 text-slate-400" />
+            <h2 className="text-xl font-semibold mb-2">ログインが必要です</h2>
+            <p className="text-slate-600 mb-4">Gmailメッセージにアクセスするには、Googleアカウントでログインしてください。</p>
+            <Button onClick={() => window.location.href = '/login'}>
+              ログイン
+            </Button>
+          </div>
+        </Card>
+      </div>
+    )
+  }
+
   const fetchGmailMessages = async (page = 1, isRefresh = false) => {
     setIsLoading(true)
     setError("")
@@ -226,10 +255,13 @@ export default function MailPage() {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      const data = await response.json()
+      const apiResponse = await response.json()
+      
+      // 新しいAPIレスポンス形式に対応
+      const data = apiResponse.success ? apiResponse.data : apiResponse
       
       // Gmail APIレスポンスをUIに適した形式に変換
-      const formattedMessages: GmailMessage[] = data.messages.map((msg: any) => ({
+      const formattedMessages: GmailMessage[] = (data.messages || []).map((msg: any) => ({
         id: msg.id,
         threadId: msg.threadId,
         sender: msg.sender || 'Unknown',
@@ -272,6 +304,8 @@ export default function MailPage() {
       console.error('Error fetching Gmail messages:', error)
       if (error instanceof Error && error.message.includes('401')) {
         setError('Gmail認証が必要です。ログインしてください。')
+      } else if (error instanceof Error && error.message.includes('map')) {
+        setError('メールデータの形式が正しくありません。しばらく待ってから再度お試しください。')
       } else {
         setError('メールの取得に失敗しました。Gmail API設定を確認してください。')
       }
@@ -300,7 +334,8 @@ export default function MailPage() {
         throw new Error('Failed to fetch message details')
       }
       
-      const messageDetails = await response.json()
+      const apiResponse = await response.json()
+      const messageDetails = apiResponse.success ? apiResponse.data : apiResponse
       setSelectedMessage(messageDetails)
     } catch (error) {
       console.error('Error fetching message details:', error)

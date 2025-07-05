@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import Image from "next/image"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -70,6 +71,7 @@ const kpiData = [
 ]
 
 export default function HomePage() {
+  const { data: session, status } = useSession()
   const router = useRouter()
   const [activeItem, setActiveItem] = useState("home")
   const [currentTime, setCurrentTime] = useState<Date | null>(null)
@@ -103,6 +105,36 @@ export default function HomePage() {
       day: 'numeric',
       weekday: 'long'
     })
+  }
+
+  // ローディング状態
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-slate-600">認証状態を確認中...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 未認証状態
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-white flex items-center justify-center">
+        <Card className="bg-white/55 backdrop-blur-[24px] border-white/20 shadow-[0_8px_24px_rgba(0,0,0,0.08)] rounded-[20px] p-8">
+          <div className="text-center">
+            <Home className="w-12 h-12 mx-auto mb-4 text-slate-400" />
+            <h2 className="text-xl font-semibold mb-2">ログインが必要です</h2>
+            <p className="text-slate-600 mb-4">ダッシュボードにアクセスするには、Googleアカウントでログインしてください。</p>
+            <Button onClick={() => window.location.href = '/login'}>
+              ログイン
+            </Button>
+          </div>
+        </Card>
+      </div>
+    )
   }
 
   return (

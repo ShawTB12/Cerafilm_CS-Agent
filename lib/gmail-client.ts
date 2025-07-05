@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import { GMAIL_CONFIG } from './gmail-config';
+import { isAuthError } from './auth';
 
 export interface EmailMessage {
   id: string;
@@ -30,27 +31,111 @@ export interface EmailListResponse {
   resultSizeEstimate: number;
 }
 
+export interface GmailClientOptions {
+  maxRetries?: number;
+  retryDelay?: number;
+}
+
 export class GmailClient {
   private gmail: any;
+  private auth: any;
+  private accessToken: string;
+  private maxRetries: number;
+  private retryDelay: number;
   
-  constructor(accessToken: string) {
-    const auth = new google.auth.OAuth2(
+  constructor(accessToken: string, options: GmailClientOptions = {}) {
+    this.accessToken = accessToken;
+    this.maxRetries = options.maxRetries || 3;
+    this.retryDelay = options.retryDelay || 1000;
+    
+    this.auth = new google.auth.OAuth2(
       GMAIL_CONFIG.clientId,
       GMAIL_CONFIG.clientSecret
     );
     
-    auth.setCredentials({
+    this.auth.setCredentials({
       access_token: accessToken,
     });
     
-    this.gmail = google.gmail({ version: GMAIL_CONFIG.apiVersion, auth });
+    this.gmail = google.gmail({ version: GMAIL_CONFIG.apiVersion, auth: this.auth });
+  }
+  
+  /**
+   * APIリクエストを実行（リトライ機能付き）
+   */
+  private async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        const result = await operation();
+        if (attempt > 1) {
+          console.log(`${operationName} succeeded on attempt ${attempt}`);
+        }
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        
+        console.error(`${operationName} failed on attempt ${attempt}:`, error?.message || error);
+        
+        // 認証エラーの場合は即座に失敗
+        if (isAuthError(error)) {
+          throw new Error(`Authentication failed: ${error?.message || error}`);
+        }
+        
+        // 最後の試行でない場合はリトライ
+        if (attempt < this.maxRetries) {
+          const delay = this.retryDelay * Math.pow(2, attempt - 1); // 指数バックオフ
+          console.log(`Retrying ${operationName} in ${delay}ms...`);
+          await this.sleep(delay);
+        }
+      }
+    }
+    
+    throw new Error(`${operationName} failed after ${this.maxRetries} attempts: ${lastError?.message || lastError}`);
+  }
+  
+  /**
+   * 遅延処理
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+  
+  /**
+   * アクセストークンを更新
+   */
+  updateAccessToken(accessToken: string): void {
+    this.accessToken = accessToken;
+    this.auth.setCredentials({
+      access_token: accessToken,
+    });
+  }
+  
+  /**
+   * 接続テスト
+   */
+  async testConnection(): Promise<boolean> {
+    try {
+      await this.executeWithRetry(async () => {
+        const response = await this.gmail.users.getProfile({ userId: 'me' });
+        return response.data;
+      }, 'Connection test');
+      return true;
+    } catch (error) {
+      console.error('Connection test failed:', error);
+      return false;
+    }
   }
   
   /**
    * メール一覧を取得
    */
   async listMessages(query?: string, maxResults?: number, pageToken?: string): Promise<EmailListResponse> {
-    try {
+    return this.executeWithRetry(async () => {
       const response = await this.gmail.users.messages.list({
         userId: 'me',
         q: query,
@@ -59,17 +144,14 @@ export class GmailClient {
       });
       
       return response.data;
-    } catch (error) {
-      console.error('Error listing messages:', error);
-      throw new Error('Failed to list messages');
-    }
+    }, 'List messages');
   }
   
   /**
    * 特定のメールを取得
    */
   async getMessage(messageId: string): Promise<EmailMessage> {
-    try {
+    return this.executeWithRetry(async () => {
       const response = await this.gmail.users.messages.get({
         userId: 'me',
         id: messageId,
@@ -77,17 +159,14 @@ export class GmailClient {
       });
       
       return response.data;
-    } catch (error) {
-      console.error('Error getting message:', error);
-      throw new Error('Failed to get message');
-    }
+    }, `Get message ${messageId}`);
   }
   
   /**
    * メールを送信
    */
   async sendMessage(to: string, subject: string, body: string, threadId?: string): Promise<any> {
-    try {
+    return this.executeWithRetry(async () => {
       const raw = this.createRawMessage(to, subject, body, threadId);
       
       const response = await this.gmail.users.messages.send({
@@ -99,17 +178,14 @@ export class GmailClient {
       });
       
       return response.data;
-    } catch (error) {
-      console.error('Error sending message:', error);
-      throw new Error('Failed to send message');
-    }
+    }, 'Send message');
   }
   
   /**
    * メールの既読状態を変更
    */
   async markAsRead(messageId: string): Promise<void> {
-    try {
+    await this.executeWithRetry(async () => {
       await this.gmail.users.messages.modify({
         userId: 'me',
         id: messageId,
@@ -117,10 +193,21 @@ export class GmailClient {
           removeLabelIds: ['UNREAD'],
         },
       });
-    } catch (error) {
-      console.error('Error marking message as read:', error);
-      throw new Error('Failed to mark message as read');
-    }
+    }, `Mark message ${messageId} as read`);
+  }
+  
+  /**
+   * バッチでメッセージを取得（効率化）
+   */
+  async getMessagesBatch(messageIds: string[]): Promise<EmailMessage[]> {
+    return this.executeWithRetry(async () => {
+      const promises = messageIds.map(id => this.getMessage(id));
+      const results = await Promise.allSettled(promises);
+      
+      return results
+        .filter((result): result is PromiseFulfilledResult<EmailMessage> => result.status === 'fulfilled')
+        .map(result => result.value);
+    }, 'Get messages batch');
   }
   
   /**
@@ -198,23 +285,26 @@ export class GmailClient {
   static stripHtmlTags(html: string): string {
     // 改行タグを改行文字に変換
     let text = html.replace(/<br\s*\/?>/gi, '\n')
-                  .replace(/<\/p>/gi, '\n\n')
-                  .replace(/<\/div>/gi, '\n');
+                  .replace(/<\/p>/gi, '\n')
+                  .replace(/<p[^>]*>/gi, '')
+                  .replace(/<\/div>/gi, '\n')
+                  .replace(/<div[^>]*>/gi, '');
     
-    // HTMLタグを除去
+    // 他のHTMLタグを除去
     text = text.replace(/<[^>]*>/g, '');
     
     // HTMLエンティティをデコード
     text = text.replace(/&nbsp;/g, ' ')
                .replace(/&lt;/g, '<')
                .replace(/&gt;/g, '>')
+               .replace(/&amp;/g, '&')
                .replace(/&quot;/g, '"')
-               .replace(/&#39;/g, "'")
-               .replace(/&amp;/g, '&');
+               .replace(/&#39;/g, "'");
     
-    // 余分な空白行を整理
-    text = text.replace(/\n\s*\n\s*\n/g, '\n\n')
-               .replace(/^\s+|\s+$/g, '');
+    // 余分な空白と改行を整理
+    text = text.replace(/\n\s*\n/g, '\n\n')
+               .replace(/[ \t]+/g, ' ')
+               .trim();
     
     return text;
   }

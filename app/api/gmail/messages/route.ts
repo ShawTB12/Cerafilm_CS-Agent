@@ -2,16 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { GmailClient } from '@/lib/gmail-client';
+import { APIError, createSuccessResponse, createErrorResponse } from '@/lib/utils';
 
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     
     if (!session?.accessToken) {
-      return NextResponse.json(
-        { error: 'Authentication required. Please sign in with Google.' },
-        { status: 401 }
+      const error = new APIError(
+        'Authentication required. Please sign in with Google.',
+        'AUTH_REQUIRED',
+        401,
+        { isAuthError: true }
       );
+      return NextResponse.json(createErrorResponse(error), { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -56,19 +60,16 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    return NextResponse.json({
+    const response = createSuccessResponse({
       messages: messageDetails.filter(Boolean),
       nextPageToken: messages.nextPageToken,
       resultSizeEstimate: messages.resultSizeEstimate,
     });
+    
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Error in GET /api/gmail/messages:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to fetch Gmail messages. Please check your authentication.',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    const apiError = APIError.fromError(error);
+    return NextResponse.json(createErrorResponse(apiError), { status: apiError.statusCode });
   }
 } 

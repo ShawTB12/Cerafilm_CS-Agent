@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useSession } from "next-auth/react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Search, Filter, Send, Sparkles, RefreshCw, ImageIcon, Smile, MoreHorizontal } from "lucide-react"
+import { ArrowLeft, Search, Filter, Send, Sparkles, RefreshCw, ImageIcon, Smile, MoreHorizontal, MessageCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface LineMessage {
@@ -31,6 +32,7 @@ interface LineChat {
 }
 
 export default function LinePage() {
+  const { data: session, status } = useSession()
   const [selectedChat, setSelectedChat] = useState<number | null>(null)
   const [message, setMessage] = useState("")
   const [lineChats, setLineChats] = useState<LineChat[]>([])
@@ -161,6 +163,35 @@ export default function LinePage() {
   }, [selectedChat, lineChats])
 
   const selectedChatData = selectedChat ? lineChats.find((l) => l.id === selectedChat) : null
+
+  // 認証状態の確認
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-slate-600">認証状態を確認中...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100 flex items-center justify-center">
+        <Card className="bg-white/55 backdrop-blur-[24px] border-white/20 shadow-[0_8px_24px_rgba(0,0,0,0.08)] rounded-[20px] p-8">
+          <div className="text-center">
+            <MessageCircle className="w-12 h-12 mx-auto mb-4 text-slate-400" />
+            <h2 className="text-xl font-semibold mb-2">ログインが必要です</h2>
+            <p className="text-slate-600 mb-4">LINEメッセージにアクセスするには、Googleアカウントでログインしてください。</p>
+            <Button onClick={() => window.location.href = '/login'}>
+              ログイン
+            </Button>
+          </div>
+        </Card>
+      </div>
+    )
+  }
 
   if (loading) {
     return (
