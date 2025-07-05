@@ -45,13 +45,40 @@ export default function LinePage() {
     try {
       const url = userId ? `/api/line/messages?userId=${userId}` : '/api/line/messages'
       console.log('Fetching messages from:', url)
-      const response = await fetch(url)
-      const data = await response.json()
       
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // セッションクッキーを含める
+      })
+      
+      if (!response.ok) {
+        console.error('HTTP Error:', response.status, response.statusText)
+        if (response.status === 401) {
+          console.error('Authentication required - redirecting to login')
+          window.location.href = '/login'
+          return []
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        console.error('Non-JSON response received:', text.substring(0, 200))
+        throw new Error('Invalid response format - expected JSON')
+      }
+      
+      const data = await response.json()
       console.log('API Response:', data)
       
-      if (response.ok) {
-        console.log('Messages fetched successfully:', data.messages.length, 'messages')
+      if (data.success && data.data) {
+        console.log('Messages fetched successfully:', data.data.messages?.length || 0, 'messages')
+        return data.data.messages || []
+      } else if (data.messages) {
+        // 古い形式の互換性維持
+        console.log('Messages fetched successfully (legacy format):', data.messages.length, 'messages')
         return data.messages
       } else {
         console.error('Failed to fetch messages:', data.error)
