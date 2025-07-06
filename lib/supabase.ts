@@ -107,6 +107,19 @@ export class KnowledgeService {
     return data as KnowledgeBase[]
   }
 
+  // ID別ナレッジ取得
+  static async getKnowledgeById(id: string) {
+    const { data, error } = await supabase
+      .from('knowledge_base')
+      .select('*')
+      .eq('id', id)
+      .eq('is_active', true)
+      .single()
+
+    if (error) throw error
+    return data as KnowledgeBase
+  }
+
   // 全文検索
   static async searchKnowledge(query: string) {
     const { data, error } = await supabase

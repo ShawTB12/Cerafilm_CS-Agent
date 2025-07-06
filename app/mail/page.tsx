@@ -92,33 +92,14 @@ const mailData = [
   },
 ]
 
-// ナレッジデータの定義
-const knowledgeData = [
-  {
-    id: 1,
-    title: "返品・交換ポリシー",
-    description: "商品の返品・交換に関する手続きと条件",
-    relevanceScore: 95,
-    category: "返品対応",
-    content: "返品申請フォームの案内、着払い発送、3-5営業日での返金処理"
-  },
-  {
-    id: 2,
-    title: "お詫び・謝罪対応",
-    description: "商品不具合や問題発生時の適切な謝罪表現",
-    relevanceScore: 88,
-    category: "謝罪対応",
-    content: "丁寧な謝罪文と今後の対応方針の説明"
-  },
-  {
-    id: 3,
-    title: "カスタマーサポート連絡先",
-    description: "追加サポートが必要な場合の連絡方法",
-    relevanceScore: 72,
-    category: "サポート情報",
-    content: "お客様センターの電話番号、メールアドレス、営業時間"
-  }
-]
+// 動的ナレッジデータ（AI解析後にSupabaseから取得）
+interface RelevantKnowledge {
+  id: string
+  title: string
+  description: string
+  category: string
+  relevanceScore: number
+}
 
 interface GmailMessage {
   id: string;
@@ -135,31 +116,17 @@ export default function MailPage() {
   const { data: session, status } = useSession()
   const [selectedMail, setSelectedMail] = useState<string | null>(null)
   const [selectedKnowledge, setSelectedKnowledge] = useState<number | null>(null)
+  const [relevantKnowledge, setRelevantKnowledge] = useState<RelevantKnowledge[]>([])
+  const [selectedKnowledgeIds, setSelectedKnowledgeIds] = useState<string[]>([])
   const [generatedResponse, setGeneratedResponse] = useState("")
   const [manualResponse, setManualResponse] = useState("")
   const [replySubject, setReplySubject] = useState("")
+  const [emailAnalysis, setEmailAnalysis] = useState<any>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [aiTokensUsed, setAiTokensUsed] = useState(0)
 
-  // メール内容に基づいてナレッジの推奨度を計算
-  const getRelevantKnowledge = (mailContent: string, mailSubject: string) => {
-    const content = (mailContent + " " + mailSubject).toLowerCase()
-    
-    return knowledgeData.map(knowledge => {
-      let score = knowledge.relevanceScore
-      
-      // キーワードベースのスコア調整
-      if (content.includes("返品") || content.includes("交換")) {
-        if (knowledge.category === "返品対応") score = Math.min(98, score + 15)
-      }
-      if (content.includes("不具合") || content.includes("問題") || content.includes("申し訳")) {
-        if (knowledge.category === "謝罪対応") score = Math.min(95, score + 12)
-      }
-      if (content.includes("問い合わせ") || content.includes("教えて") || content.includes("わからない")) {
-        if (knowledge.category === "サポート情報") score = Math.min(90, score + 8)
-      }
-      
-      return { ...knowledge, relevanceScore: score }
-    }).sort((a, b) => b.relevanceScore - a.relevanceScore)
-  }
+
   const [gmailMessages, setGmailMessages] = useState<GmailMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
@@ -376,97 +343,100 @@ export default function MailPage() {
 
   const selectedMailData = selectedMail ? displayMessages.find((m) => m.id.toString() === selectedMail.toString()) : null
 
-  const relevantKnowledge = selectedMailData 
-    ? getRelevantKnowledge(selectedMailData.body || selectedMailData.preview, selectedMailData.subject)
-    : knowledgeData
+  // 関連ナレッジの表示用データ（AI解析後にSupabaseから取得）
 
   // ナレッジに基づいて返信文と件名を生成
-  const generateReplyFromKnowledge = (knowledgeId: number) => {
-    const knowledge = knowledgeData.find(k => k.id === knowledgeId)
-    if (!knowledge || !selectedMailData) return
+  // AI メール解析機能
+  const analyzeEmail = async () => {
+    if (!selectedMessage) return
 
-    const customerName = selectedMailData.sender.split(' ')[0] || 'お客様'
-    const originalSubject = selectedMailData.subject
-    
-    // 件名生成
-    const replySubject = originalSubject.startsWith('Re: ') 
-      ? originalSubject 
-      : `Re: ${originalSubject}`
-    
-    // ナレッジに基づいた返信文生成
-    let replyContent = ''
-    
-    switch (knowledge.category) {
-      case '返品対応':
-        replyContent = `${customerName}様
+    setIsAnalyzing(true)
+    try {
+      const response = await fetch('/api/ai/analyze-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          emailContent: selectedMessage.body || selectedMessage.snippet,
+          emailSubject: selectedMessage.subject,
+        }),
+      })
 
-この度は弊社商品をご購入いただき、ありがとうございます。
-また、商品の不具合によりご迷惑をおかけし、誠に申し訳ございません。
-
-返品につきまして、以下の手順でお手続きください：
-
-📝 返品手順
-1. 返品申請フォームにご記入
-2. 商品を元の梱包材で梱包
-3. 着払いにて弊社まで発送
-
-返品申請フォームのURLを別途お送りいたします。
-商品到着後、3-5営業日以内に返金処理を行います。
-
-ご不明な点がございましたら、お気軽にお問い合わせください。
-
-Cerafilm CS Agent`
-        break
-        
-      case '謝罪対応':
-        replyContent = `${customerName}様
-
-いつも弊社をご利用いただき、誠にありがとうございます。
-この度は、ご不便をおかけしており、心よりお詫び申し上げます。
-
-お客様のご指摘を真摯に受け止め、改善に向けて全力で取り組んでまいります。
-つきましては、詳細をお伺いさせていただき、適切な対応をご提案させていただきたく存じます。
-
-お忙しい中恐れ入りますが、お返事をお待ちしております。
-
-Cerafilm CS Agent`
-        break
-        
-      case 'サポート情報':
-        replyContent = `${customerName}様
-
-お問い合わせいただき、ありがとうございます。
-
-ご質問の件につきまして、以下の方法でサポートをご提供しております：
-
-📞 お客様センター
-電話: 0120-XXX-XXX（平日 9:00-18:00）
-メール: support@cerafilm.com
-
-💻 よくあるご質問
-https://cerafilm.com/faq
-
-また、緊急のお問い合わせの場合は、お電話でのご連絡をお勧めいたします。
-
-何かご不明な点がございましたら、お気軽にお問い合わせください。
-
-Cerafilm CS Agent`
-        break
-        
-      default:
-        replyContent = `${customerName}様
-
-お問い合わせいただき、ありがとうございます。
-ご質問の件について、担当者より改めてご連絡いたします。
-
-お待たせして申し訳ございませんが、今しばらくお時間をいただけますでしょうか。
-
-Cerafilm CS Agent`
+      const result = await response.json()
+      
+      if (result.success) {
+        setEmailAnalysis(result.data.analysis)
+        setRelevantKnowledge(result.data.relevantKnowledge || [])
+        setAiTokensUsed(prev => prev + (result.data.tokens_used || 0))
+        console.log('メール解析完了:', result.data.analysis)
+        console.log('関連ナレッジ取得:', result.data.relevantKnowledge)
+      } else {
+        console.error('メール解析エラー:', result.error)
+        setError('メール解析に失敗しました: ' + result.error)
+      }
+    } catch (error) {
+      console.error('メール解析API呼び出しエラー:', error)
+      setError('メール解析に失敗しました')
+    } finally {
+      setIsAnalyzing(false)
     }
-    
-    setReplySubject(replySubject)
-    setManualResponse(replyContent)
   }
+
+  // AI 返信文生成機能
+  const generateAIReply = async () => {
+    if (!selectedMessage) return
+
+    setIsGenerating(true)
+    try {
+      const response = await fetch('/api/ai/generate-reply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          emailContent: selectedMessage.body || selectedMessage.snippet,
+          emailSubject: selectedMessage.subject,
+          senderName: selectedMessage.sender,
+          selectedKnowledgeIds,
+          emailAnalysis,
+        }),
+      })
+
+      const result = await response.json()
+      
+      if (result.success) {
+        setManualResponse(result.data.replyContent)
+        setReplySubject(result.data.replySubject)
+        setAiTokensUsed(prev => prev + (result.data.tokens_used || 0))
+        console.log('AI返信文生成完了:', {
+          length: result.data.replyContent.length,
+          knowledgeUsed: result.data.knowledge_used
+        })
+      } else {
+        console.error('AI返信文生成エラー:', result.error)
+        setError('AI返信文生成に失敗しました: ' + result.error)
+      }
+    } catch (error) {
+      console.error('AI返信文生成API呼び出しエラー:', error)
+      setError('AI返信文生成に失敗しました')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // ナレッジ選択のトグル機能
+  const toggleKnowledgeSelection = (knowledgeId: string) => {
+    setSelectedKnowledgeIds(prev => {
+      if (prev.includes(knowledgeId)) {
+        return prev.filter(id => id !== knowledgeId)
+      } else {
+        return [...prev, knowledgeId]
+      }
+    })
+  }
+
+  // 古い静的ナレッジ生成機能は削除（AI機能に置き換え）
 
   // 未認証時の表示
   if (status === "loading") {
@@ -609,73 +579,177 @@ Cerafilm CS Agent`
 
             {/* Right: Response Panel */}
             <div className="space-y-6 flex flex-col" style={{height: '780px'}}>
-              {/* Knowledge Selection */}
-              <Card className="bg-white/70 backdrop-blur-[32px] border border-white/40 shadow-[0_8px_32px_rgba(0,0,0,0.1)] rounded-[24px] hover:shadow-[0_12px_48px_rgba(0,0,0,0.15)] transition-all duration-300 flex-shrink-0" style={{height: '320px'}}>
-                <CardContent className="p-6">
+              {/* AI Analysis & Knowledge Selection */}
+              <Card className="bg-white/70 backdrop-blur-[32px] border border-white/40 shadow-[0_8px_32px_rgba(0,0,0,0.1)] rounded-[24px] hover:shadow-[0_12px_48px_rgba(0,0,0,0.15)] transition-all duration-300 flex-shrink-0" style={{height: '400px'}}>
+                <CardContent className="p-6 flex flex-col h-full">
                   <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-emerald-600 rounded-[10px] flex items-center justify-center shadow-[0_4px_12px_rgba(34,197,94,0.3)]">
-                      <BookOpen className="w-4 h-4 text-white" />
+                    <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-purple-600 rounded-[10px] flex items-center justify-center shadow-[0_4px_12px_rgba(147,51,234,0.3)]">
+                      <Sparkles className="w-4 h-4 text-white" />
                     </div>
-                    <h3 className="font-bold text-slate-900">ナレッジ選択</h3>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => {
-                        if (selectedKnowledge) {
-                          generateReplyFromKnowledge(selectedKnowledge)
-                        }
-                      }}
-                      disabled={!selectedKnowledge}
-                      className="ml-auto rounded-[10px] bg-white/50 backdrop-blur-[16px] border border-white/30 hover:bg-white/70 hover:scale-105 transition-all duration-200 disabled:opacity-50"
-                    >
-                      <Sparkles className="w-3 h-3 mr-1" />
-                      回答案生成
-                    </Button>
+                    <h3 className="font-bold text-slate-900">AI解析・ナレッジ選択</h3>
+                    <div className="flex items-center space-x-2 ml-auto">
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={analyzeEmail}
+                        disabled={isAnalyzing || !selectedMessage}
+                        className="rounded-[10px] bg-white/50 backdrop-blur-[16px] border border-white/30 hover:bg-white/70 hover:scale-105 transition-all duration-200 disabled:opacity-50"
+                      >
+                        {isAnalyzing ? (
+                          <div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mr-1" />
+                        ) : (
+                          <TrendingUp className="w-3 h-3 mr-1" />
+                        )}
+                        {isAnalyzing ? '解析中...' : 'AI解析'}
+                      </Button>
+                    </div>
                   </div>
 
-                  <div className="space-y-2 overflow-y-auto" style={{maxHeight: '240px'}}>
-                    {relevantKnowledge.map((knowledge) => (
-                      <div
-                        key={knowledge.id}
-                        onClick={() => setSelectedKnowledge(knowledge.id)}
-                        className={cn(
-                          "p-3 rounded-[12px] cursor-pointer transition-all duration-200 border",
-                          selectedKnowledge === knowledge.id
-                            ? "bg-green-50/80 border-green-200/60 shadow-[0_2px_8px_rgba(34,197,94,0.2)]"
-                            : "bg-white/50 border-white/40 hover:bg-white/70 hover:border-green-200/40"
-                        )}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm font-semibold text-slate-900">{knowledge.title}</span>
-                          <div className="flex items-center space-x-2">
-                            <Badge 
-                              variant="secondary" 
-                              className="text-xs bg-blue-100/80 text-blue-700"
-                            >
-                              {knowledge.relevanceScore}%
-                            </Badge>
-                            {selectedKnowledge === knowledge.id && (
-                              <CheckCircle className="w-4 h-4 text-green-600" />
-                            )}
-                          </div>
+                  {/* AI Analysis Results */}
+                  {emailAnalysis && (
+                    <div className="mb-4 p-3 bg-purple-50/80 rounded-[12px] border border-purple-200/50">
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="font-semibold text-purple-800">カテゴリー:</span>
+                          <Badge variant="outline" className="ml-1 bg-purple-100 text-purple-700">
+                            {emailAnalysis.category}
+                          </Badge>
                         </div>
-                        <p className="text-xs text-slate-600 line-clamp-2">{knowledge.description}</p>
+                        <div>
+                          <span className="font-semibold text-purple-800">緊急度:</span>
+                          <Badge variant="outline" className={cn(
+                            "ml-1",
+                            emailAnalysis.priority === "高" ? "bg-red-100 text-red-700" :
+                            emailAnalysis.priority === "中" ? "bg-yellow-100 text-yellow-700" :
+                            "bg-green-100 text-green-700"
+                          )}>
+                            {emailAnalysis.priority}
+                          </Badge>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-purple-800">感情:</span>
+                          <Badge variant="outline" className={cn(
+                            "ml-1",
+                            emailAnalysis.sentiment === "不満" ? "bg-red-100 text-red-700" :
+                            emailAnalysis.sentiment === "満足" ? "bg-green-100 text-green-700" :
+                            "bg-gray-100 text-gray-700"
+                          )}>
+                            {emailAnalysis.sentiment}
+                          </Badge>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="font-semibold text-purple-800">要約:</span>
+                          <p className="text-purple-700 mt-1">{emailAnalysis.summary}</p>
+                        </div>
                       </div>
-                    ))}
+                    </div>
+                  )}
+
+                  {/* Knowledge Selection */}
+                  <div className="flex-1 overflow-hidden">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-slate-900">関連ナレッジ</span>
+                      <span className="text-xs text-slate-600">
+                        {selectedKnowledgeIds.length}件選択中
+                      </span>
+                    </div>
+                    <div className="space-y-2 overflow-y-auto h-full">
+                      {relevantKnowledge.length > 0 ? (
+                        relevantKnowledge.map((knowledge) => {
+                          const isSelected = selectedKnowledgeIds.includes(knowledge.id.toString())
+                          return (
+                            <div
+                              key={knowledge.id}
+                              onClick={() => toggleKnowledgeSelection(knowledge.id.toString())}
+                              className={cn(
+                                "p-3 rounded-[12px] cursor-pointer transition-all duration-200 border",
+                                isSelected
+                                  ? "bg-green-50/80 border-green-200/60 shadow-[0_2px_8px_rgba(34,197,94,0.2)]"
+                                  : "bg-white/50 border-white/40 hover:bg-white/70 hover:border-green-200/40"
+                              )}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm font-semibold text-slate-900">{knowledge.title}</span>
+                                <div className="flex items-center space-x-2">
+                                  <Badge 
+                                    variant="secondary" 
+                                    className="text-xs bg-blue-100/80 text-blue-700"
+                                  >
+                                    {knowledge.relevanceScore}%
+                                  </Badge>
+                                  {isSelected && (
+                                    <CheckCircle className="w-4 h-4 text-green-600" />
+                                  )}
+                                </div>
+                              </div>
+                              <p className="text-xs text-slate-600 line-clamp-2">{knowledge.description}</p>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-full text-center">
+                          <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 rounded-full flex items-center justify-center mb-4 shadow-[0_8px_24px_rgba(147,51,234,0.25)]">
+                            <Sparkles className="w-8 h-8 text-white" />
+                          </div>
+                          <h3 className="text-lg font-bold text-slate-900 mb-2">AI解析でナレッジを検索</h3>
+                          <p className="text-sm text-slate-600 mb-6 max-w-xs">
+                            メール内容を分析して、関連するナレッジを自動で選択します
+                          </p>
+                          <Button 
+                            onClick={analyzeEmail}
+                            disabled={isAnalyzing || !selectedMessage}
+                            className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 rounded-[16px] shadow-[0_6px_20px_rgba(147,51,234,0.3)] hover:shadow-[0_8px_28px_rgba(147,51,234,0.4)] transition-all duration-300 disabled:opacity-50 px-8 py-3 text-base font-semibold"
+                          >
+                            {isAnalyzing ? (
+                              <>
+                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-3" />
+                                解析中...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-5 h-5 mr-3" />
+                                AI解析を開始
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
 
 
-              {/* Manual Response */}
+              {/* AI Reply Generation & Manual Response */}
               <Card className="bg-white/70 backdrop-blur-[32px] border border-white/40 shadow-[0_8px_32px_rgba(0,0,0,0.1)] rounded-[24px] hover:shadow-[0_12px_48px_rgba(0,0,0,0.15)] transition-all duration-300 flex-shrink-0" style={{height: '420px'}}>
                 <CardContent className="p-6 flex flex-col h-full">
                   <div className="flex items-center space-x-3 mb-4">
                     <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-green-600 rounded-[10px] flex items-center justify-center shadow-[0_4px_12px_rgba(34,197,94,0.3)]">
                       <Send className="w-4 h-4 text-white" />
                     </div>
-                    <h3 className="font-bold text-slate-900">返信作成</h3>
+                    <h3 className="font-bold text-slate-900">AI返信作成</h3>
+                    <div className="flex items-center space-x-2 ml-auto">
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={generateAIReply}
+                        disabled={isGenerating || !selectedMessage}
+                        className="rounded-[10px] bg-white/50 backdrop-blur-[16px] border border-white/30 hover:bg-white/70 hover:scale-105 transition-all duration-200 disabled:opacity-50"
+                      >
+                        {isGenerating ? (
+                          <div className="w-3 h-3 border-2 border-green-500 border-t-transparent rounded-full animate-spin mr-1" />
+                        ) : (
+                          <Sparkles className="w-3 h-3 mr-1" />
+                        )}
+                        {isGenerating ? '生成中...' : 'AI返信生成'}
+                      </Button>
+                      {aiTokensUsed > 0 && (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">
+                          {aiTokensUsed} tokens
+                        </Badge>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-4 flex flex-col">
@@ -722,9 +796,21 @@ Cerafilm CS Agent`
                         >
                           下書き保存
                         </Button>
-                        <Button className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 rounded-[12px] shadow-[0_4px_12px_rgba(34,197,94,0.3)] hover:shadow-[0_6px_16px_rgba(34,197,94,0.4)] transition-all duration-200">
+                        <Button 
+                          variant="outline"
+                          size="sm"
+                          disabled={!manualResponse.trim()}
+                          className="rounded-[10px] bg-orange-50/50 backdrop-blur-[16px] border-orange-200/40 hover:bg-orange-100/70 transition-all duration-200 text-orange-700 disabled:opacity-50"
+                        >
+                          <CheckCircle className="w-3 h-3 mr-2" />
+                          内容確認
+                        </Button>
+                        <Button 
+                          disabled={!manualResponse.trim() || !replySubject.trim()}
+                          className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 rounded-[12px] shadow-[0_4px_12px_rgba(34,197,94,0.3)] hover:shadow-[0_6px_16px_rgba(34,197,94,0.4)] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
                           <Send className="w-4 h-4 mr-2" />
-                          送信
+                          送信確認
                         </Button>
                       </div>
                     </div>
@@ -880,6 +966,14 @@ Cerafilm CS Agent`
                 key={mail.id}
                 onClick={() => {
                   setSelectedMail(mail.id.toString())
+                  // AI機能の状態をリセット
+                  setEmailAnalysis(null)
+                  setRelevantKnowledge([])
+                  setSelectedKnowledgeIds([])
+                  setManualResponse("")
+                  setReplySubject("")
+                  setAiTokensUsed(0)
+                  
                   // Gmail APIから取得したメッセージの場合、詳細を取得
                   if (gmailMessages.length > 0 && mail.originalId) {
                     fetchMessageDetails(mail.originalId)
